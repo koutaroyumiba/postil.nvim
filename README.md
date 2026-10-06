@@ -14,6 +14,16 @@
 
 > Early development. See [CHANGELOG.md](CHANGELOG.md) for the planned behaviour.
 
+## Overview
+
+The primary workflow is:
+
+1. Select text in visual mode
+2. Invoke PostilSend through a user keymap
+3. Enter an instruction through `vim.ui.input()`
+4. Reuse the configured tmux pane, or create one automatically if no valid target exists
+5. Paste a structured message into the pane and optionally submit it.
+
 ## Requirements
 
 - Neovim 0.10 or newer

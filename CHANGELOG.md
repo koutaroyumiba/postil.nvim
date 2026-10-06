@@ -8,17 +8,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Planned for 1.0.0
 
-- Capture characterwise, linewise, and blockwise Neovim visual selections.
-- Prompt for an instruction and compose it with file, range, filetype, root, and selection context.
-- Send multiline messages safely to a tmux pane without shell interpolation.
-- Select and remember an existing tmux pane by stable pane ID.
-- Automatically create a configurable detached pane when no live target exists.
-- Start any configured interactive command in the project directory.
-- Recreate the target automatically after its pane is closed.
-- Support optional automatic Enter submission and one-shot inversion with `:PostilSend!`.
-- Provide commands to send, select a target, create a target, clear a target, and inspect status.
-- Support a custom message formatter through `setup()`.
-- Support lazy.nvim installation without third-party runtime dependencies.
-- Include headless checks for selection and formatting logic.
+- Capture characterwise, linewise, and blockwise visual selections.
+- Preserve the selected text exactly, including partial first and last lines.
+- Include the absolute file path, selected line range, Neovim filetype, and selected text in the outgoing message.
+- Prompt for a free-form instruction using `vim.ui.input()`.
+- Cancel cleanly when the prompt is dismissed or empty.
+- Address tmux panes by stable pane ID, such as `%7`, rather than pane index.
+- Reuse a live target pane across sends during the current Neovim process.
+- Let the user select any pane in the current tmux session.
+- Automatically create a pane when no target is configured or the remembered pane no longer exists.
+- Start a configurable command in an automatically created pane.
+- Create the pane in the current project directory.
+- Paste multiline content without shell interpolation or simulated typing.
+- Optionally press Enter after pasting.
+- Provide Lua functions and user commands for sending, choosing, creating, clearing, and inspecting the target.
+- Notify the user of actionable failures through `vim.notify()`.
+- Work with lazy.nvim through a conventional `require("postil").setup()` entry point.
+- Require no third-party Lua dependencies.
+
 
 [Unreleased]: https://github.com/koutaroyumiba/postil.nvim/compare/v1.0.0...HEAD
