@@ -93,6 +93,11 @@ local ok, err = xpcall(function()
   assert_error(function()
     postil.setup({ root_markers = {} })
   end, "root_markers must be a non-empty list")
+
+  -- testing command registration
+  for _, command in ipairs({ "PostilSend", "PostilTarget", "PostilNew", "PostilClearTarget", "PostilStatus" }) do
+    assert(vim.fn.exists(":" .. command) == 2, command .. " was not registered")
+  end
 end, debug.traceback)
 
 if not ok then

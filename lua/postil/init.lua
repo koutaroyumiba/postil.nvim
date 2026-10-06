@@ -206,8 +206,72 @@ function M.setup(opts)
 
   validate_options(opts)
   config = merge_options(opts)
+  M._register_commands()
 
   return true
+end
+
+function M._register_commands()
+  local function register(name, callback, opts)
+    opts = opts or {}
+    opts.force = true
+
+    vim.api.nvim_create_user_command(name, callback, opts)
+  end
+
+  register("PostilSend", function(args)
+    local submit = config.submit
+
+    if args.bang then
+      submit = not submit
+    end
+
+    M.send_visual({ submit = submit })
+  end, {
+    bang = true,
+    range = true,
+    desc = "Send the visual selection with Postil",
+  })
+
+  register("PostilTarget", function(args)
+    local pane_id = args.args ~= "" and args.args or nil
+    M.select_target(pane_id)
+  end, {
+    nargs = "?",
+    desc = "Select a Postil target pane",
+  })
+
+  register("PostilNew", function()
+    M.new_target()
+  end, { desc = "Create a new Postil target pane" })
+
+  register("PostilClearTarget", function()
+    M.clear_target()
+  end, { desc = "Forget the Postil target pane" })
+
+  register("PostilStatus", function()
+    M.status()
+  end, { desc = "Show Postil status" })
+end
+
+function M.send_visual(_)
+  return nil, "not implemented"
+end
+
+function M.select_target(_)
+  return nil, "not implemented"
+end
+
+function M.new_target()
+  return nil, "not implemented"
+end
+
+function M.clear_target()
+  return nil, "not implemented"
+end
+
+function M.status()
+  return nil, "not implemented"
 end
 
 -- private helper for testing
