@@ -16,7 +16,6 @@ local ok, err = xpcall(function()
 
   local postil = require("postil")
   assert(type(postil) == "table")
-  assert(type(require("postil.selection")) == "table")
   assert(type(require("postil.tmux")) == "table")
 
   assert(type(postil.setup) == "function")
@@ -98,6 +97,219 @@ local ok, err = xpcall(function()
   for _, command in ipairs({ "PostilSend", "PostilTarget", "PostilNew", "PostilClearTarget", "PostilStatus" }) do
     assert(vim.fn.exists(":" .. command) == 2, command .. " was not registered")
   end
+
+  -- tseting selection extraction
+  local selection = require("postil.selection")
+  assert(type(selection) == "table")
+
+  local function assert_selection(actual, expected)
+    assert(actual ~= nil, "expected a selection")
+    assert(
+      vim.deep_equal(actual, expected),
+      string.format(
+        "selection mismatch\nexpected: %s\nactual: %s",
+        vim.inspect(expected),
+        vim.inspect(actual)
+      )
+    )
+  end
+
+  local bufnr = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+    "alpha bravo",
+    "charlie delta",
+    "echo",
+    "xy",
+    "日本語abc",
+    "日x",
+    "abc"
+  })
+
+  -- characterwise selection
+  local character = assert(selection.extract(
+    bufnr,
+    { line = 1, column = 7 },
+    { line = 1, column = 11 },
+    "v",
+    "inclusive"
+  ))
+  assert_selection(character, {
+    text = "bravo",
+    start_line = 1,
+    end_line = 1,
+    selection_type = "character"
+  })
+
+  local multiline = assert(selection.extract(
+    bufnr,
+    { line = 1, column = 7 },
+    { line = 2, column = 7 },
+    "v",
+    "inclusive"
+  ))
+  assert_selection(multiline, {
+    text = "bravo\ncharlie",
+    start_line = 1,
+    end_line = 2,
+    selection_type = "character"
+  })
+
+  local exclusive = assert(selection.extract(
+    bufnr,
+    { line = 1, column = 7 },
+    { line = 1, column = 11 },
+    "v",
+    "exclusive"
+  ))
+  assert_selection(exclusive, {
+    text = "brav",
+    start_line = 1,
+    end_line = 1,
+    selection_type = "character"
+  })
+
+  -- linewise selections
+  local linewise = assert(selection.extract(
+    bufnr,
+    { line = 1, column = 8 },
+    { line = 2, column = 2 },
+    "V",
+    "inclusive"
+  ))
+  assert_selection(linewise, {
+    text = "alpha bravo\ncharlie delta",
+    start_line = 1,
+    end_line = 2,
+    selection_type = "line"
+  })
+
+  -- blockwise selection
+  local blockwise = assert(selection.extract(
+    bufnr,
+    { line = 1, column = 1 },
+    { line = 3, column = 4 },
+    "\22",
+    "inclusive"
+  ))
+  assert_selection(blockwise, {
+    text = "alph\nchar\necho",
+    start_line = 1,
+    end_line = 3,
+    selection_type = "block"
+  })
+
+  local short_blockwise = assert(selection.extract(
+    bufnr,
+    { line = 3, column = 3 },
+    { line = 4, column = 6 },
+    "\22",
+    "inclusive"
+  ))
+  assert_selection(short_blockwise, {
+    text = "ho\n",
+    start_line = 3,
+    end_line = 4,
+    selection_type = "block",
+  })
+
+  -- reversed selections
+  local reversed = assert(selection.extract(
+    bufnr,
+    { line = 2, column = 7 },
+    { line = 1, column = 7 },
+    "v",
+    "inclusive"
+  ))
+  assert_selection(reversed, {
+    text = "bravo\ncharlie",
+    start_line = 1,
+    end_line = 2,
+    selection_type = "character",
+  })
+
+  local reversed_line = assert(selection.extract(
+    bufnr,
+    { line = 2, column = 2 },
+    { line = 1, column = 8 },
+    "V",
+    "inclusive"
+  ))
+  assert_selection(reversed_line, {
+    text = "alpha bravo\ncharlie delta",
+    start_line = 1,
+    end_line = 2,
+    selection_type = "line"
+  })
+
+  local reversed_block = assert(selection.extract(
+    bufnr,
+    { line = 3, column = 4 },
+    { line = 1, column = 1 },
+    "\22",
+    "inclusive"
+  ))
+  assert_selection(reversed_block, {
+    text = "alph\nchar\necho",
+    start_line = 1,
+    end_line = 3,
+    selection_type = "block"
+  })
+
+  -- unicode tests
+  -- japanese chars take up 3 utf8 bytes
+  local unicode = assert(selection.extract(
+    bufnr,
+    { line = 5, column = 1 },
+    { line = 5, column = 4 },
+    "v",
+    "inclusive"
+  ))
+  assert_selection(unicode, {
+    text = "日本",
+    start_line = 5,
+    end_line = 5,
+    selection_type = "character"
+  })
+
+  local unicode_block = assert(selection.extract(
+    bufnr,
+    { line = 6, column = 1 },
+    { line = 7, column = 1 },
+    "\22",
+    "inclusive"
+  ))
+  assert_selection(unicode_block, {
+    text = "日\na",
+    start_line = 6,
+    end_line = 7,
+    selection_type = "block",
+  })
+
+  -- invalid input
+  local missing_mark, missing_mark_error = selection.extract(
+    bufnr,
+    { line = 0, column = 1 },
+    { line = 1, column = 1 },
+    "v",
+    "inclusive"
+  )
+  assert(missing_mark == nil)
+  assert(missing_mark_error == "start mark.line must be a positive integer")
+
+  local invalid_mode, invalid_mode_error = selection.extract(
+    bufnr,
+    { line = 1, column = 1 },
+    { line = 1, column = 2 },
+    "?",
+    "inclusive"
+  )
+  assert(invalid_mode == nil)
+  assert(invalid_mode_error == "unsupported visual selection mode")
+
+  -- cleanup
+  vim.api.nvim_buf_delete(bufnr, { force = true })
+
+  -- END OF TESTS
 end, debug.traceback)
 
 if not ok then

@@ -1,2 +1,273 @@
+---@alias PostilSelectionType "character" | "line" | "block"
+---@alias PostilVisualMode "v" | "V" | "\22"
+---@alias PostilSelectionOption "inclusive" | "exclusive" | "old"
+
+---@class PostilPosition
+---@field line integer
+---@field column integer
+
+---@class PostilSelection
+---@field text string
+---@field start_line integer
+---@field end_line integer
+---@field selection_type PostilSelectionType
+
 local M = {}
+
+---@type table<string, PostilSelectionType>
+local selection_types = {
+  ["v"] = "character",
+  ["V"] = "line",
+  ["\22"] = "block",
+}
+
+---@param value any
+---@return boolean
+local function is_positive_integer(value)
+  return type(value) == "number"
+      and value > 0
+      and value < math.huge
+      and value == math.floor(value)
+end
+
+---@param position any
+---@param name string
+---@return boolean valid
+---@return string? error
+local function validate_position(position, name)
+  if type(position) ~= "table" then
+    return false, name .. " must be a table"
+  end
+
+  if not is_positive_integer(position.line) then
+    return false, name .. ".line must be a positive integer"
+  end
+
+  if not is_positive_integer(position.column) then
+    return false, name .. ".column must be a positive integer"
+  end
+
+  return true
+end
+
+---@param left PostilPosition
+---@param right PostilPosition
+---@return boolean
+local function position_is_after(left, right)
+  return left.line > right.line or (left.line == right.line and left.column > right.column)
+end
+
+---@param position PostilPosition
+---@return PostilPosition
+local function copy_position(position)
+  return {
+    line = position.line,
+    column = position.column,
+  }
+end
+
+---@param start_mark PostilPosition
+---@param end_mark PostilPosition
+---@param selection_type PostilSelectionType
+---@return PostilPosition start_position
+---@return PostilPosition end_position
+local function normalize_positions(start_mark, end_mark, selection_type)
+  if selection_type == "block" then
+    return {
+      line = math.min(start_mark.line, end_mark.line),
+      column = math.min(start_mark.column, end_mark.column),
+    }, {
+      line = math.max(start_mark.line, end_mark.line),
+      column = math.max(start_mark.column, end_mark.column),
+    }
+  end
+
+  local start_position = copy_position(start_mark)
+  local end_position = copy_position(end_mark)
+
+  if position_is_after(start_position, end_position) then
+    start_position, end_position = end_position, start_position
+  end
+
+  return start_position, end_position
+end
+
+---@param line string
+---@param column integer
+---@return integer
+local function inclusive_end_column(line, column)
+  local first_byte = line:byte(column)
+
+  -- i lwk have no idea what this is doing
+  if first_byte == nil or first_byte < 0x80 then
+    return column
+  elseif first_byte < 0xE0 then
+    return column + 1
+  elseif first_byte < 0xF0 then
+    return column + 2
+  elseif first_byte < 0xF8 then
+    return column + 3
+  end
+
+  return column
+end
+
+---@param lines string[]
+---@param start_column integer
+---@param end_column integer
+---@return string
+local function extract_characterwise(lines, start_column, end_column)
+  if #lines == 1 then
+    return lines[1]:sub(start_column, end_column)
+  end
+
+  local selected = {}
+
+  selected[1] = lines[1]:sub(start_column)
+
+  for index = 2, #lines - 1 do
+    selected[#selected + 1] = lines[index]
+  end
+
+  selected[#selected + 1] = lines[#lines]:sub(1, end_column)
+
+  return table.concat(selected, "\n")
+end
+
+---@param lines string[]
+---@param start_column integer
+---@param end_column integer
+---@return string
+local function extract_blockwise(lines, start_column, end_column, exclusive)
+  local selected = {}
+
+
+  for _, line in ipairs(lines) do
+    local row_end_column
+
+    if exclusive then
+      row_end_column = end_column - 1
+    else
+      row_end_column = inclusive_end_column(line, end_column)
+    end
+
+    selected[#selected + 1] = line:sub(start_column, row_end_column)
+  end
+
+  return table.concat(selected, "\n")
+end
+
+---@param start_mark PostilPosition
+---@param end_mark PostilPosition
+---@param visual_mode PostilVisualMode
+---@param selection_option PostilSelectionOption
+---@return PostilSelection? selection
+---@return string? error
+function M.extract(bufnr, start_mark, end_mark, visual_mode, selection_option)
+  if type(bufnr) ~= "number" or not vim.api.nvim_buf_is_valid(bufnr) then
+    return nil, "buffer is invalid"
+  end
+
+  local start_valid, start_error = validate_position(start_mark, "start mark")
+  if not start_valid then
+    return nil, start_error
+  end
+
+  local end_valid, end_error = validate_position(end_mark, "end mark")
+  if not end_valid then
+    return nil, end_error
+  end
+
+  local selection_type = selection_types[visual_mode]
+  if not selection_type then
+    return nil, "unsupported visual selection mode"
+  end
+
+  if selection_option ~= "inclusive" and selection_option ~= "exclusive" and selection_option ~= "old" then
+    return nil, "invalid selection option"
+  end
+
+  local start_position, end_position = normalize_positions(start_mark, end_mark, selection_type)
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+
+  if start_position.line > line_count or end_position.line > line_count then
+    return nil, "selection marks are outside the buffer"
+  end
+
+  local read_ok, lines = pcall(vim.api.nvim_buf_get_lines, bufnr, start_position.line - 1, end_position.line, false)
+  if not read_ok then
+    return nil, "failed to read the selected lines"
+  end
+  if #lines == 0 then
+    return nil, "selection contains no lines"
+  end
+
+  local end_column = end_position.column
+  -- for characterwise and blockwise selections, nvim's "exclusive" option
+  -- excludes the final byte...
+  -- blockwise is handled in extract_blockwise
+  if selection_type == "character" then
+    if selection_option == "exclusive" then
+      end_column = end_column - 1
+    else
+      end_column = inclusive_end_column(lines[#lines], end_column)
+    end
+  end
+
+  local text
+
+  if selection_type == "character" then
+    text = extract_characterwise(lines, start_position.column, end_column)
+  elseif selection_type == "line" then
+    text = table.concat(lines, "\n")
+  else
+    text = extract_blockwise(lines, start_position.column, end_column, selection_option == "exclusive")
+  end
+
+  return {
+    text = text,
+    start_line = start_position.line,
+    end_line = end_position.line,
+    selection_type = selection_type,
+  }
+end
+
+---@param bufnr? integer
+---@return PostilSelection? selection
+---@return string? error
+function M.capture(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return nil, "buffer is invalid"
+  end
+
+  local start_mark = vim.api.nvim_buf_get_mark(bufnr, "<")
+  local end_mark = vim.api.nvim_buf_get_mark(bufnr, ">")
+
+  if start_mark[1] == 0 or end_mark[1] == 0 then
+    return nil, "visual selection marks are unavailable"
+  end
+
+  -- nvim_buf_get_mark() returns a one-based line and a zero-based byte column.
+  -- M.extract() uses one-based columns...
+  -- I hate one-based indexing...
+  local start_position = {
+    line = start_mark[1],
+    column = start_mark[2] + 1,
+  }
+  local end_position = {
+    line = end_mark[1],
+    column = end_mark[2] + 1,
+  }
+
+  return M.extract(
+    bufnr,
+    start_position,
+    end_position,
+    vim.fn.visualmode(),
+    vim.o.selection
+  )
+end
+
 return M
