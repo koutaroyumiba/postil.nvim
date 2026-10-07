@@ -22,6 +22,10 @@ The primary workflow is:
 5. Reuse the configured tmux pane, or create one automatically.
 6. Paste the complete formatted message as one bracketed multiline prompt.
 
+<div align="center">
+  <img alt="Sending a selection from Neovim to Pi with Postil" src="assets/postil-send.gif" />
+</div>
+
 `PostilPreview` follows the same selection and instruction flow, then opens the formatted message in a read-only floating window without contacting tmux.
 
 <div align="center">
@@ -316,11 +320,14 @@ Run the headless checks with:
 nvim --headless -u tests/minimal.lua
 ```
 
-Regenerate the preview GIF on a configured development machine with:
+Regenerate the GIFs on a configured development machine with:
 
 ```sh
 vhs demo/preview.tape
+vhs demo/send.tape
 ```
+
+The send demo starts Pi in a temporary tmux session and may use the configured model provider.
 
 ## License
 
