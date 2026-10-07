@@ -3,7 +3,7 @@ Output assets/postil-preview.gif
 Set Shell "zsh"
 Set Width 1100
 Set Height 720
-Set FontFamily "SF Mono"
+Set FontFamily "IosevkaTerm Nerd Font"
 Set FontSize 18
 Set Framerate 30
 Set TypingSpeed 55ms
@@ -16,7 +16,10 @@ Enter
 Sleep 2s
 Type ":lua if Snacks and Snacks.notifier then Snacks.notifier.hide() end"
 Enter
-Sleep 500ms
+Sleep 250ms
+Type ":"
+Escape
+Sleep 250ms
 Show
 Sleep 1s
 
