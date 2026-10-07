@@ -362,6 +362,8 @@ function M.paste(pane_id, message, submit)
   local pasted, paste_error = run({
     "paste-buffer",
     "-d",
+    "-p",
+    "-r",
     "-b",
     buffer_name,
     "-t",
