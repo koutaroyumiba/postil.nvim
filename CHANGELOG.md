@@ -6,7 +6,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## Unreleased
 
-### Planned for 1.0.0
+## [1.0.0] - 2026-10-07
+
+### Added
 
 - Capture characterwise, linewise, and blockwise visual selections.
 - Preserve the selected text exactly, including partial first and last lines.
@@ -29,3 +31,4 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 
 [Unreleased]: https://github.com/koutaroyumiba/postil.nvim/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/koutaroyumiba/postil.nvim/releases/tag/v1.0.0

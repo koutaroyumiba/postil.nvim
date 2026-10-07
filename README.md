@@ -11,8 +11,6 @@
 
 </div>
 
-> **Status:** pre-release. See [CHANGELOG.md](CHANGELOG.md) for the planned v1 scope.
-
 ## Overview
 
 The primary workflow is:
