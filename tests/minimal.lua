@@ -126,6 +126,28 @@ local ok, err = xpcall(function()
     assert(vim.fn.exists(":" .. command) == 2, command .. " was not registered")
   end
 
+  -- testing per-call send option validation
+  local original_notify = vim.notify
+  vim.notify = function() end
+
+  local invalid_send, invalid_send_error = postil.send_visual(false)
+  assert(invalid_send == nil)
+  assert(invalid_send_error == "send options must be a table")
+
+  local unknown_send, unknown_send_error = postil.send_visual({
+    unknown = true,
+  })
+  assert(unknown_send == nil)
+  assert(unknown_send_error == "unknown send option: unknown")
+
+  local invalid_submit, invalid_submit_error = postil.send_visual({
+    submit = "yes",
+  })
+  assert(invalid_submit == nil)
+  assert(invalid_submit_error == "submit must be a boolean")
+
+  vim.notify = original_notify
+
   -- testing selection extraction
   local selection = require("postil.selection")
   assert(type(selection) == "table")

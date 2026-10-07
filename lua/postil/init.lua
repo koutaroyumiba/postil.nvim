@@ -39,6 +39,9 @@
 ---@field root_markers? string[]
 ---@field format? PostilFormatter
 
+---@class PostilSendOptions
+---@field submit? boolean
+
 local selection = require("postil.selection")
 local tmux = require("postil.tmux")
 
@@ -199,6 +202,11 @@ local function notify_info(message)
 end
 
 ---@param message string
+local function notify_warn(message)
+  vim.notify(message, vim.log.levels.WARN, { title = "postil.nvim" })
+end
+
+---@param message string
 local function notify_error(message)
   vim.notify(message, vim.log.levels.ERROR, { title = "postil.nvim" })
 end
@@ -211,10 +219,14 @@ local function fail(message)
   return nil, message or "something went wrong"
 end
 
+---@param bufnr? integer
 ---@return string
-local function project_root()
+local function project_root(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+
   local cwd = vim.fs.abspath(vim.fn.getcwd())
-  local name = vim.api.nvim_buf_get_name(0)
+  local name = vim.api.nvim_buf_get_name(bufnr)
+
   if name == "" then
     return cwd
   end
@@ -223,12 +235,13 @@ local function project_root()
   return vim.fs.root(path, config.root_markers) or cwd
 end
 
+---@param bufnr? integer
 ---@return PostilTmuxTargetOptions
-local function target_options()
+local function target_options(bufnr)
   return {
     direction = config.split.direction,
     size = config.split.size,
-    cwd = project_root(),
+    cwd = project_root(bufnr),
     command = config.command,
   }
 end
@@ -387,7 +400,16 @@ local function open_preview(message)
   })
 end
 
+local function leave_visual_mode()
+  local mode = vim.api.nvim_get_mode().mode
+
+  if mode == "v" or mode == "V" or mode == "\22" then
+    vim.cmd("normal! \27")
+  end
+end
+
 local M = {}
+local busy = false
 
 ---@param opts? PostilSetupOptions
 ---@return true
@@ -454,8 +476,103 @@ function M._register_commands()
   end, { range = true, desc = "Preview a formatted Postil selection" })
 end
 
-function M.send_visual(_)
-  return nil, "not implemented"
+---@param opts? PostilSendOptions
+---@return true? ok
+---@return string? error
+function M.send_visual(opts)
+  if opts == nil then
+    opts = {}
+  end
+
+  if type(opts) ~= "table" then
+    return fail("send options must be a table")
+  end
+
+  for key in pairs(opts) do
+    if key ~= "submit" then
+      return fail("unknown send option: " .. tostring(key))
+    end
+  end
+
+  if opts.submit ~= nil and type(opts.submit) ~= "boolean" then
+    return fail("submit must be a boolean")
+  end
+
+  if busy then
+    local message = "Postil is busy"
+    notify_warn(message)
+    return nil, message
+  end
+
+  local environment_ok, environment_error = tmux.check_environment()
+  if not environment_ok then
+    return fail(environment_error)
+  end
+
+  local submit = config.submit
+  if opts.submit ~= nil then
+    submit = opts.submit
+    assert(submit ~= nil)
+  end
+
+  local bufnr = vim.api.nvim_get_current_buf()
+  busy = true
+  leave_visual_mode()
+
+  vim.schedule(function()
+    local captured, capture_error = selection.capture(bufnr)
+    if not captured then
+      busy = false
+      notify_error(capture_error or "failed to capture selection")
+      return
+    end
+
+    open_instruction_editor(config.prompt, function(instruction)
+      if instruction == nil then
+        busy = false
+        return
+      end
+
+      local context, context_error = selection.build_context(captured, instruction, bufnr, config.root_markers)
+      if not context then
+        busy = false
+        notify_error(context_error or "failed to build selection context")
+        return
+      end
+
+      local message, format_error = selection.format(context, config.format)
+      if not message then
+        busy = false
+        notify_error(format_error or "failed to format selection")
+        return
+      end
+
+      local pane_id, created, target_error = tmux.resolve_target(target_options(bufnr))
+      if not pane_id then
+        busy = false
+        notify_error(target_error or "failed to resolve tmux target")
+        return
+      end
+
+      local delay = 0
+      if created then
+        delay = config.startup_delay
+      end
+
+      vim.defer_fn(function()
+        local sent, send_error = tmux.paste(pane_id, message, submit)
+        busy = false
+        if not sent then
+          notify_error(send_error or "failed to send to tmux pane")
+          return
+        end
+
+        notify_info("Sent to " .. pane_id)
+      end, delay)
+    end)
+  end)
+
+  return true
 end
 
 ---@param pane_id? string
@@ -566,11 +683,7 @@ end
 
 function M.preview_visual()
   local bufnr = vim.api.nvim_get_current_buf()
-  local mode = vim.api.nvim_get_mode().mode
-
-  if mode == "v" or mode == "V" or mode == "\22" then
-    vim.cmd("normal! \27")
-  end
+  leave_visual_mode()
 
   vim.schedule(function()
     local captured, capture_error = selection.capture(bufnr)
