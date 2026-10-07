@@ -26,6 +26,10 @@ The primary workflow is:
 
 `PostilPreview` follows the same selection and instruction flow, then opens the formatted message in a read-only floating buffer without contacting tmux.
 
+<div align="center">
+  <img alt="PostilPreview demonstration" src="assets/postil-preview.gif" />
+</div>
+
 ## Requirements
 
 - Neovim 0.12 or newer
