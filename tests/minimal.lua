@@ -15,8 +15,28 @@ local ok, err = xpcall(function()
   end
 
   local postil = require("postil")
+  local tmux = require("postil.tmux")
   assert(type(postil) == "table")
-  assert(type(require("postil.tmux")) == "table")
+  assert(type(tmux) == "table")
+
+  for _, function_name in ipairs({
+    "check_environment",
+    "current_pane",
+    "pane_exists",
+    "list_panes",
+    "get_target",
+    "set_target",
+    "clear_target",
+    "live_target",
+    "create_pane",
+    "resolve_target",
+    "paste",
+  }) do
+    assert(type(tmux[function_name]) == "function", "missing tmux." .. function_name)
+  end
+
+  assert(tmux.clear_target() == true)
+  assert(tmux.get_target() == nil)
 
   assert(type(postil.setup) == "function")
   assert(type(postil.preview_visual) == "function")

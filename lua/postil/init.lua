@@ -40,6 +40,7 @@
 ---@field format? PostilFormatter
 
 local selection = require("postil.selection")
+local tmux = require("postil.tmux")
 
 ---@type PostilConfig
 local defaults = {
@@ -193,8 +194,43 @@ local function merge_options(opts)
 end
 
 ---@param message string
+local function notify_info(message)
+  vim.notify(message, vim.log.levels.INFO, { title = "postil.nvim" })
+end
+
+---@param message string
 local function notify_error(message)
   vim.notify(message, vim.log.levels.ERROR, { title = "postil.nvim" })
+end
+
+---@param message string?
+---@return nil
+---@return string
+local function fail(message)
+  notify_error(message or "something went wrong")
+  return nil, message or "something went wrong"
+end
+
+---@return string
+local function project_root()
+  local cwd = vim.fs.abspath(vim.fn.getcwd())
+  local name = vim.api.nvim_buf_get_name(0)
+  if name == "" then
+    return cwd
+  end
+
+  local path = vim.fs.abspath(name)
+  return vim.fs.root(path, config.root_markers) or cwd
+end
+
+---@return PostilTmuxTargetOptions
+local function target_options()
+  return {
+    direction = config.split.direction,
+    size = config.split.size,
+    cwd = project_root(),
+    command = config.command,
+  }
 end
 
 ---@param prompt string
@@ -422,20 +458,110 @@ function M.send_visual(_)
   return nil, "not implemented"
 end
 
-function M.select_target(_)
-  return nil, "not implemented"
+---@param pane_id? string
+---@return true? ok
+---@return string? error
+function M.select_target(pane_id)
+  local environment_ok, environment_error = tmux.check_environment()
+  if not environment_ok then
+    return fail(environment_error)
+  end
+
+  if pane_id ~= nil then
+    local selected, select_error = tmux.set_target(pane_id)
+    if not selected then
+      return fail(select_error)
+    end
+
+    notify_info("Target set to " .. pane_id)
+    return true
+  end
+
+  local panes, list_error = tmux.list_panes()
+  if not panes then
+    return fail(list_error)
+  end
+  if #panes == 0 then
+    return fail("no tmux panes found in the current session")
+  end
+
+  vim.ui.select(panes, {
+    prompt = "Postil target: ",
+    format_item = function(pane)
+      local location = string.format(
+        "%s:%d.%d",
+        pane.session_name,
+        pane.window_index,
+        pane.pane_index
+      )
+      local path = vim.fn.fnamemodify(pane.current_path, ":~")
+      return string.format(
+        "%s  %s  %s  %s",
+        pane.id,
+        location,
+        pane.current_command,
+        path
+      )
+    end,
+  }, function(choice)
+    if choice == nil then
+      return
+    end
+
+    local selected, select_error = tmux.set_target(choice.id)
+    if not selected then
+      notify_error(select_error or "tmux target selection error")
+      return
+    end
+
+    notify_info("Target set to " .. choice.id)
+  end)
+
+  return true
 end
 
+---@return true? ok
+---@return string? error
 function M.new_target()
-  return nil, "not implemented"
+  local pane_id, create_error = tmux.create_pane(target_options())
+  if not pane_id then
+    return fail(create_error)
+  end
+
+  notify_info("Created target " .. pane_id)
+  return true
 end
 
+---@return true
 function M.clear_target()
-  return nil, "not implemented"
+  tmux.clear_target()
+  notify_info("Cleared Postil target")
+  return true
 end
 
+---@return true
 function M.status()
-  return nil, "not implemented"
+  local pane_id = tmux.get_target()
+  local live = false
+  local environment_ok, environment_error = tmux.check_environment()
+
+  if pane_id ~= nil and environment_ok then
+    live = tmux.pane_exists(pane_id) == true
+  end
+
+  local lines = {
+    "Target: " .. (pane_id or "none"),
+    "Live: " .. (live and "yes" or "no"),
+    "Command: " .. config.command,
+    "Project: " .. project_root(),
+  }
+
+  if not environment_ok then
+    lines[#lines + 1] = "Tmux: " .. environment_error
+  end
+
+  notify_info(table.concat(lines, "\n"))
+  return true
 end
 
 function M.preview_visual()
