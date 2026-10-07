@@ -306,7 +306,123 @@ local ok, err = xpcall(function()
   assert(invalid_mode == nil)
   assert(invalid_mode_error == "unsupported visual selection mode")
 
+  -- formatting tests
+  vim.api.nvim_buf_set_name(bufnr, repository_root .. "/lua/example.lua")
+  vim.bo[bufnr].filetype = "lua"
+
+  local context = assert(selection.build_context(
+    character,
+    "Explain this selection",
+    bufnr,
+    { ".git" }
+  ))
+
+  assert(context.instruction == "Explain this selection")
+  assert(context.text == "bravo")
+  assert(context.path == repository_root .. "/lua/example.lua")
+  assert(context.relative_path == "lua/example.lua")
+  assert(context.start_line == 1)
+  assert(context.end_line == 1)
+  assert(context.filetype == "lua")
+  assert(context.root == repository_root)
+  assert(context.selection_type == "character")
+  assert(vim.fs.normalize(context.path) == vim.fs.normalize(repository_root .. "/lua/example.lua"))
+
+  -- default formatting
+  local message = assert(selection.format(context))
+  local expected_message = table.concat({
+    "File: lua/example.lua",
+    "Line: 1",
+    "Filetype: lua",
+    "",
+    "```lua",
+    "bravo",
+    "```",
+    "",
+    "Instruction: Explain this selection",
+  }, "\n")
+
+  assert(
+    message == expected_message,
+    string.format(
+      "message mismatch\nexpected: %s\nactual: %s",
+      vim.inspect(expected_message),
+      vim.inspect(message)
+    )
+  )
+  assert(message:sub(-1) ~= "\n")
+
+  -- multiline ranges
+  local multiline_context = assert(selection.build_context(
+    multiline,
+    "Explain both lines",
+    bufnr,
+    { ".git" }
+  ))
+  local multiline_message = assert(selection.format(multiline_context))
+  assert(multiline_message:find("Lines: 1-2", 1, true), "expected multiline range")
+
+  -- embedded backticks
+  local fence_context = vim.deepcopy(context)
+  fence_context.text = "before ``` after"
+  local fence_message = assert(selection.format(fence_context))
+
+  assert(fence_message:find(
+    "````lua\nbefore ``` after\n````",
+    1,
+    true
+  ), "expected a four-backtick fence")
+
+  -- empty filetype
+  local no_filetype_context = vim.deepcopy(context)
+  no_filetype_context.filetype = ""
+  local no_filetype_message = assert(selection.format(no_filetype_context))
+
+  assert(not no_filetype_message:find("Filetype:", 1, true))
+  assert(no_filetype_message:find("\n```\nbravo\n```", 1, true), "expected a fence without a language")
+
+  -- custom formatter
+  local custom_message = assert(selection.format(
+    context,
+    function(custom_context)
+      return custom_context.instruction
+          .. ": "
+          .. custom_context.text
+    end
+  ))
+  assert(custom_message == "Explain this selection: bravo")
+
+  -- custom formatter error
+  local failed_message, formatter_error = selection.format(context, function()
+    error("formatter exploded")
+  end)
+  assert(failed_message == nil)
+  assert(formatter_error == "custom formatter failed")
+
+  -- non string formatter result
+  local invalid_message, invalid_formatter_error = selection.format(context, function()
+    return 42
+  end)
+  assert(invalid_message == nil)
+  assert(invalid_formatter_error == "custom formatter must return a string")
+
+  -- unnamed buffers
+  local unnamed_bufnr = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(unnamed_bufnr, 0, -1, false, { "unnamed content" })
+
+  local unnamed_context = assert(selection.build_context({
+    text = "unnamed",
+    start_line = 1,
+    end_line = 1,
+    selection_type = "character"
+  }, "Explain", unnamed_bufnr, { ".git" }))
+
+  assert(unnamed_context.path == "[No Name]")
+  assert(unnamed_context.relative_path == "[No Name]")
+  assert(unnamed_context.root == vim.fs.abspath(vim.fn.getcwd()))
+
   -- cleanup
+  vim.api.nvim_buf_delete(unnamed_bufnr, { force = true })
   vim.api.nvim_buf_delete(bufnr, { force = true })
 
   -- END OF TESTS

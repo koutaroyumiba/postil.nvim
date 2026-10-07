@@ -270,4 +270,132 @@ function M.capture(bufnr)
   )
 end
 
+---@param selection PostilSelection
+---@param instruction string
+---@param bufnr? integer
+---@param root_markers string[]
+---@return PostilFormatContext? context
+---@return string? error
+function M.build_context(selection, instruction, bufnr, root_markers)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  if not vim.api.nvim_buf_is_valid(bufnr) or not vim.api.nvim_buf_is_loaded(bufnr) then
+    return nil, "buffer is invalid"
+  end
+
+  if type(selection) ~= "table" then
+    return nil, "selection is invalid"
+  end
+
+  if type(instruction) ~= "string" then
+    return nil, "instruction must be a string"
+  end
+
+  if type(root_markers) ~= "table" or not vim.islist(root_markers) or #root_markers == 0 then
+    return nil, "root markers must be a non-empty list"
+  end
+
+  local cwd = vim.fs.abspath(vim.fn.getcwd())
+  local name = vim.api.nvim_buf_get_name(bufnr)
+
+  local path
+  local relative_path
+  local root
+
+  if name == "" then
+    path = "[No Name]"
+    relative_path = "[No Name]"
+    root = cwd
+  else
+    path = vim.fs.abspath(name)
+    root = vim.fs.root(path, root_markers) or cwd
+    relative_path = vim.fs.relpath(root, path) or path
+  end
+
+  return {
+    instruction = instruction,
+    text = selection.text,
+    path = path,
+    relative_path = relative_path,
+    start_line = selection.start_line,
+    end_line = selection.end_line,
+    filetype = vim.bo[bufnr].filetype,
+    root = root,
+    selection_type = selection.selection_type,
+  }
+end
+
+---@param text string
+---@return string
+local function code_fence(text)
+  local longest_run = 0
+
+  for run in text:gmatch("`+") do
+    longest_run = math.max(longest_run, #run)
+  end
+
+  return string.rep("`", math.max(3, longest_run + 1))
+end
+
+---@param context PostilFormatContext
+---@return string
+local function default_format(context)
+  local lines = { "File: " .. context.relative_path }
+
+  if context.start_line == context.end_line then
+    lines[#lines + 1] = string.format("Line: %d", context.start_line)
+  else
+    lines[#lines + 1] = string.format("Lines: %d-%d", context.start_line, context.end_line)
+  end
+
+  if context.filetype ~= "" then
+    lines[#lines + 1] = "Filetype: " .. context.filetype
+  end
+
+  local fence = code_fence(context.text)
+  local opening_fence = fence
+
+  if context.filetype ~= "" then
+    opening_fence = opening_fence .. context.filetype
+  end
+
+  lines[#lines + 1] = ""
+  lines[#lines + 1] = opening_fence
+  lines[#lines + 1] = context.text
+  lines[#lines + 1] = fence
+  lines[#lines + 1] = ""
+  lines[#lines + 1] = "Instruction: " .. context.instruction
+
+  return table.concat(lines, "\n")
+end
+
+---@param context PostilFormatContext
+---@param custom_formatter? PostilFormatter
+---@return string? message
+---@return string? error
+function M.format(context, custom_formatter)
+  if type(context) ~= "table" then
+    return nil, "formatter context is invalid"
+  end
+
+  if custom_formatter == nil then
+    return default_format(context)
+  end
+
+  if type(custom_formatter) ~= "function" then
+    return nil, "custom formatter must be a function"
+  end
+
+  local ok, result = pcall(custom_formatter, vim.deepcopy(context))
+
+  if not ok then
+    return nil, "custom formatter failed"
+  end
+
+  if type(result) ~= "string" then
+    return nil, "custom formatter must return a string"
+  end
+
+  return result
+end
+
 return M
