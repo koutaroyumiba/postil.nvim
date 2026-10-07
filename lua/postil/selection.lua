@@ -92,24 +92,47 @@ local function normalize_positions(start_mark, end_mark, selection_type)
   return start_position, end_position
 end
 
+---@param byte integer?
+---@return boolean
+local function is_continuation_byte(byte)
+  return byte ~= nil and byte >= 0x80 and byte < 0xC0
+end
+
+---@param line string
+---@param column integer
+---@return integer
+local function character_start_column(line, column)
+  if column > #line then
+    return column
+  end
+
+  while column > 1 and is_continuation_byte(line:byte(column)) do
+    column = column - 1
+  end
+
+  return column
+end
+
 ---@param line string
 ---@param column integer
 ---@return integer
 local function inclusive_end_column(line, column)
-  local first_byte = line:byte(column)
+  local start_column = character_start_column(line, column)
+  local first_byte = line:byte(start_column)
 
-  -- i lwk have no idea what this is doing
+  -- UTF-8 character width is encoded by the leading byte. Expanding to
+  -- the final byte prevents an inclusive selection from splitting a codepoint.
   if first_byte == nil or first_byte < 0x80 then
-    return column
+    return start_column
   elseif first_byte < 0xE0 then
-    return column + 1
+    return start_column + 1
   elseif first_byte < 0xF0 then
-    return column + 2
+    return start_column + 2
   elseif first_byte < 0xF8 then
-    return column + 3
+    return start_column + 3
   end
 
-  return column
+  return start_column
 end
 
 ---@param lines string[]
@@ -141,17 +164,17 @@ end
 local function extract_blockwise(lines, start_column, end_column, exclusive)
   local selected = {}
 
-
   for _, line in ipairs(lines) do
+    local row_start_column = character_start_column(line, start_column)
     local row_end_column
 
     if exclusive then
-      row_end_column = end_column - 1
+      row_end_column = character_start_column(line, end_column) - 1
     else
       row_end_column = inclusive_end_column(line, end_column)
     end
 
-    selected[#selected + 1] = line:sub(start_column, row_end_column)
+    selected[#selected + 1] = line:sub(row_start_column, row_end_column)
   end
 
   return table.concat(selected, "\n")
@@ -249,9 +272,8 @@ function M.capture(bufnr)
     return nil, "visual selection marks are unavailable"
   end
 
-  -- nvim_buf_get_mark() returns a one-based line and a zero-based byte column.
-  -- M.extract() uses one-based columns...
-  -- I hate one-based indexing...
+  -- nvim_buf_get_mark() returns a one-based line and a zero-based byte
+  -- column, while M.extract() uses one-based columns for Lua string slicing.
   local start_position = {
     line = start_mark[1],
     column = start_mark[2] + 1,

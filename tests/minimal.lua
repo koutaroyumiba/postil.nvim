@@ -113,6 +113,42 @@ local ok, err = xpcall(function()
   assert_error(function()
     postil.setup({ root_markers = {} })
   end, "root_markers must be a non-empty list")
+  assert_error(function()
+    postil.setup({ command = 42 })
+  end, "command must be a non-empty string")
+  assert_error(function()
+    postil.setup({ split = false })
+  end, "split must be a table")
+  assert_error(function()
+    postil.setup({ split = { unknown = true } })
+  end, "unknown option split.unknown")
+  assert_error(function()
+    postil.setup({ split = { size = 1.5 } })
+  end, "split.size must be a positive integer")
+  assert_error(function()
+    postil.setup({ submit = "yes" })
+  end, "submit must be a boolean")
+  assert_error(function()
+    postil.setup({ startup_delay = -1 })
+  end, "startup_delay must be a non-negative integer")
+  assert_error(function()
+    postil.setup({ startup_delay = 1.5 })
+  end, "startup_delay must be a non-negative integer")
+  assert_error(function()
+    postil.setup({ prompt = 42 })
+  end, "prompt must be a string")
+  assert_error(function()
+    postil.setup({ root_markers = { marker = ".git" } })
+  end, "root_markers must be a non-empty list")
+  assert_error(function()
+    postil.setup({ root_markers = { 42 } })
+  end, "root_markers[1] must be a non-empty string")
+  assert_error(function()
+    postil.setup({ root_markers = { "" } })
+  end, "root_markers[1] must be a non-empty string")
+  assert_error(function()
+    postil.setup({ format = true })
+  end, "format must be a function or nil")
 
   -- testing command registration
   for _, command in ipairs({
@@ -172,7 +208,9 @@ local ok, err = xpcall(function()
     "xy",
     "日本語abc",
     "日x",
-    "abc"
+    "abc",
+    "a日",
+    "日本",
   })
 
   -- characterwise selection
@@ -335,6 +373,34 @@ local ok, err = xpcall(function()
     selection_type = "block",
   })
 
+  local exclusive_unicode = assert(selection.extract(
+    bufnr,
+    { line = 5, column = 1 },
+    { line = 5, column = 4 },
+    "v",
+    "exclusive"
+  ))
+  assert_selection(exclusive_unicode, {
+    text = "日",
+    start_line = 5,
+    end_line = 5,
+    selection_type = "character",
+  })
+
+  local mixed_unicode_block = assert(selection.extract(
+    bufnr,
+    { line = 8, column = 2 },
+    { line = 9, column = 2 },
+    "\22",
+    "inclusive"
+  ))
+  assert_selection(mixed_unicode_block, {
+    text = "日\n日",
+    start_line = 8,
+    end_line = 9,
+    selection_type = "block",
+  })
+
   -- invalid input
   local missing_mark, missing_mark_error = selection.extract(
     bufnr,
@@ -355,6 +421,24 @@ local ok, err = xpcall(function()
   )
   assert(invalid_mode == nil)
   assert(invalid_mode_error == "unsupported visual selection mode")
+
+  -- capture the marks created by an actual visual selection
+  local original_bufnr = vim.api.nvim_get_current_buf()
+  local capture_bufnr = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(capture_bufnr, 0, -1, false, { "alpha bravo" })
+  vim.api.nvim_set_current_buf(capture_bufnr)
+  vim.cmd("normal! gg0v4l\27")
+
+  local captured = assert(selection.capture(capture_bufnr))
+  assert_selection(captured, {
+    text = "alpha",
+    start_line = 1,
+    end_line = 1,
+    selection_type = "character",
+  })
+
+  vim.api.nvim_set_current_buf(original_bufnr)
+  vim.api.nvim_buf_delete(capture_bufnr, { force = true })
 
   -- formatting tests
   vim.api.nvim_buf_set_name(bufnr, repository_root .. "/lua/example.lua")
@@ -431,6 +515,16 @@ local ok, err = xpcall(function()
   assert(not no_filetype_message:find("Filetype:", 1, true))
   assert(no_filetype_message:find("\n```\nbravo\n```", 1, true), "expected a fence without a language")
 
+  -- preserve selection whitespace, including a trailing newline
+  local whitespace_context = vim.deepcopy(context)
+  whitespace_context.text = "value  \n"
+  local whitespace_message = assert(selection.format(whitespace_context))
+  assert(
+    whitespace_message:find("```lua\nvalue  \n\n```", 1, true),
+    "expected formatter to preserve selection whitespace"
+  )
+  assert(whitespace_message:sub(-1) ~= "\n")
+
   -- custom formatter
   local custom_message = assert(selection.format(
     context,
@@ -471,7 +565,25 @@ local ok, err = xpcall(function()
   assert(unnamed_context.relative_path == "[No Name]")
   assert(unnamed_context.root == vim.fs.abspath(vim.fn.getcwd()))
 
+  -- paths outside the resolved project root stay absolute
+  local external_bufnr = vim.api.nvim_create_buf(false, true)
+  local external_path = vim.fs.abspath(vim.fn.tempname() .. "/external.lua")
+  vim.api.nvim_buf_set_name(external_bufnr, external_path)
+  vim.api.nvim_buf_set_lines(external_bufnr, 0, -1, false, { "external" })
+
+  local external_context = assert(selection.build_context({
+    text = "external",
+    start_line = 1,
+    end_line = 1,
+    selection_type = "character",
+  }, "Explain", external_bufnr, { ".git" }))
+
+  assert(external_context.path == external_path)
+  assert(external_context.relative_path == external_path)
+  assert(external_context.root == vim.fs.abspath(vim.fn.getcwd()))
+
   -- cleanup
+  vim.api.nvim_buf_delete(external_bufnr, { force = true })
   vim.api.nvim_buf_delete(unnamed_bufnr, { force = true })
   vim.api.nvim_buf_delete(bufnr, { force = true })
 

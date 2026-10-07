@@ -656,14 +656,19 @@ function M.clear_target()
   return true
 end
 
----@return true
+---@return true? ok
+---@return string? error
 function M.status()
   local pane_id = tmux.get_target()
   local live = false
   local environment_ok, environment_error = tmux.check_environment()
 
   if pane_id ~= nil and environment_ok then
-    live = tmux.pane_exists(pane_id) == true
+    local exists, exists_error = tmux.pane_exists(pane_id)
+    if exists == nil then
+      return fail(exists_error or "failed to inspect tmux target")
+    end
+    live = exists
   end
 
   local lines = {
