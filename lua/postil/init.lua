@@ -39,6 +39,8 @@
 ---@field root_markers? string[]
 ---@field format? PostilFormatter
 
+local selection = require("postil.selection")
+
 ---@type PostilConfig
 local defaults = {
   command = "pi",
@@ -190,6 +192,164 @@ local function merge_options(opts)
   return merged
 end
 
+---@param message string
+local function notify_error(message)
+  vim.notify(message, vim.log.levels.ERROR, { title = "postil.nvim" })
+end
+
+---@param prompt string
+---@param callback fun(instruction: string?)
+local function open_instruction_editor(prompt, callback)
+  local buffer = vim.api.nvim_create_buf(false, true)
+
+  vim.bo[buffer].buftype = "acwrite"
+  vim.bo[buffer].bufhidden = "wipe"
+  vim.bo[buffer].swapfile = false
+  vim.bo[buffer].filetype = "markdown"
+
+  vim.api.nvim_buf_set_name(buffer, "postil://instruction/" .. buffer)
+
+  local max_width = math.max(1, vim.o.columns - 4)
+  local max_height = math.max(1, vim.o.lines - 4)
+
+  local width = math.min(math.max(40, math.floor(vim.o.columns * 0.6)), max_width)
+  local height = math.min(math.max(5, math.floor(vim.o.lines * 0.25)), max_height)
+
+  local title = prompt:gsub("%s+$", "")
+  if title == "" then
+    title = "Postil Instruction"
+  end
+
+  local window = vim.api.nvim_open_win(buffer, true, {
+    relative = "editor",
+    style = "minimal",
+    border = "rounded",
+    title = " " .. title .. " ",
+    title_pos = "center",
+    footer = " :w submit · :q! cancel ",
+    footer_pos = "center",
+    width = width,
+    height = height,
+    row = math.max(0, math.floor((vim.o.lines - height) / 2) - 1),
+    col = math.max(0, math.floor((vim.o.columns - width) / 2)),
+  })
+
+  vim.wo[window].wrap = true
+  vim.wo[window].cursorline = false
+
+  local finished = false
+
+  ---@param instruction string?
+  local function complete(instruction)
+    if finished then
+      return
+    end
+
+    finished = true
+
+    vim.schedule(function()
+      if vim.api.nvim_win_is_valid(window) then
+        vim.api.nvim_win_close(window, true)
+      end
+
+      callback(instruction)
+    end)
+  end
+
+  vim.api.nvim_create_autocmd("BufWriteCmd", {
+    buffer = buffer,
+    callback = function()
+      local lines = vim.api.nvim_buf_get_lines(buffer, 0, -1, false)
+      local instruction = table.concat(lines, "\n")
+
+      vim.bo[buffer].modified = false
+
+      if not instruction:find("%S") then
+        complete(nil)
+        return
+      end
+
+      complete(instruction)
+    end
+  })
+
+  -- Treat :q! or another external window close as cancellation
+  vim.api.nvim_create_autocmd("BufWipeout", {
+    buffer = buffer,
+    once = true,
+    callback = function()
+      if finished then
+        return
+      end
+
+      finished = true
+
+      vim.schedule(function()
+        callback(nil)
+      end)
+    end
+  })
+
+  vim.cmd("startinsert")
+end
+
+---@param message string
+local function open_preview(message)
+  local lines = vim.split(message, "\n", {
+    plain = true,
+  })
+
+  local content_width = 1
+
+  for _, line in ipairs(lines) do
+    content_width = math.max(content_width, vim.fn.strdisplaywidth(line))
+  end
+
+  local max_width = math.max(1, vim.o.columns - 4)
+  local max_height = math.max(1, vim.o.lines - 4)
+
+  local width = math.min(math.max(20, content_width), max_width)
+  local height = math.min(math.max(1, #lines), max_height)
+
+  local buffer = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buffer, 0, -1, false, lines)
+
+  vim.bo[buffer].bufhidden = "wipe"
+  vim.bo[buffer].filetype = "markdown"
+  vim.bo[buffer].modifiable = false
+
+  local window = vim.api.nvim_open_win(buffer, true, {
+    relative = "editor",
+    style = "minimal",
+    border = "rounded",
+    title = "Postil Preview ",
+    title_pos = "center",
+    width = width,
+    height = height,
+    row = math.max(0, math.floor((vim.o.lines - height) / 2) - 1),
+    col = math.max(0, math.floor((vim.o.columns - width) / 2))
+  })
+
+  vim.wo[window].wrap = true
+  vim.wo[window].cursorline = false
+
+  local function close()
+    if vim.api.nvim_win_is_valid(window) then
+      vim.api.nvim_win_close(window, true)
+    end
+  end
+
+  vim.keymap.set("n", "q", close, {
+    buffer = buffer,
+    nowait = true,
+    silent = true,
+  })
+  vim.keymap.set("n", "<Esc>", close, {
+    buffer = buffer,
+    nowait = true,
+    silent = true,
+  })
+end
 
 local M = {}
 
@@ -252,6 +412,10 @@ function M._register_commands()
   register("PostilStatus", function()
     M.status()
   end, { desc = "Show Postil status" })
+
+  register("PostilPreview", function()
+    M.preview_visual()
+  end, { range = true, desc = "Preview a formatted Postil selection" })
 end
 
 function M.send_visual(_)
@@ -272,6 +436,45 @@ end
 
 function M.status()
   return nil, "not implemented"
+end
+
+function M.preview_visual()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local mode = vim.api.nvim_get_mode().mode
+
+  if mode == "v" or mode == "V" or mode == "\22" then
+    vim.cmd("normal! \27")
+  end
+
+  vim.schedule(function()
+    local captured, capture_error = selection.capture(bufnr)
+    if not captured then
+      notify_error(capture_error or "failed to capture selection")
+      return
+    end
+
+    open_instruction_editor(config.prompt, function(instruction)
+      if instruction == nil or instruction == "" then
+        return
+      end
+
+      local context, context_error = selection.build_context(captured, instruction, bufnr, config.root_markers)
+      if not context then
+        notify_error(context_error or "failed to build selection context")
+        return
+      end
+
+      local message, format_error = selection.format(context, config.format)
+      if not message then
+        notify_error(format_error or "failed to format selection")
+        return
+      end
+
+      open_preview(message)
+    end)
+  end)
+
+  return true
 end
 
 -- private helper for testing

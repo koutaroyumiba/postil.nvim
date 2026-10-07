@@ -11,8 +11,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Capture characterwise, linewise, and blockwise visual selections.
 - Preserve the selected text exactly, including partial first and last lines.
 - Include the absolute file path, selected line range, Neovim filetype, and selected text in the outgoing message.
-- Prompt for a free-form instruction using `vim.ui.input()`.
-- Cancel cleanly when the prompt is dismissed or empty.
+- Compose a free-form, multiline instruction in an editable floating buffer.
+- Cancel cleanly when the instruction buffer is dismissed or empty.
+- Preview the formatted selection and instruction without contacting tmux.
 - Address tmux panes by stable pane ID, such as `%7`, rather than pane index.
 - Reuse a live target pane across sends during the current Neovim process.
 - Let the user select any pane in the current tmux session.

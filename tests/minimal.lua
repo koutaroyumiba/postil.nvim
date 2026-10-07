@@ -19,6 +19,7 @@ local ok, err = xpcall(function()
   assert(type(require("postil.tmux")) == "table")
 
   assert(type(postil.setup) == "function")
+  assert(type(postil.preview_visual) == "function")
   assert(postil.setup() == true)
 
   -- testing default configs
@@ -94,11 +95,18 @@ local ok, err = xpcall(function()
   end, "root_markers must be a non-empty list")
 
   -- testing command registration
-  for _, command in ipairs({ "PostilSend", "PostilTarget", "PostilNew", "PostilClearTarget", "PostilStatus" }) do
+  for _, command in ipairs({
+    "PostilSend",
+    "PostilTarget",
+    "PostilNew",
+    "PostilClearTarget",
+    "PostilStatus",
+    "PostilPreview",
+  }) do
     assert(vim.fn.exists(":" .. command) == 2, command .. " was not registered")
   end
 
-  -- tseting selection extraction
+  -- testing selection extraction
   local selection = require("postil.selection")
   assert(type(selection) == "table")
 
