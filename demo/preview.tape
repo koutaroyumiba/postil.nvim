@@ -1,17 +1,19 @@
 Output assets/postil-preview.gif
 
 Set Shell "zsh"
-Set Width 1100
+Set Width 1280
 Set Height 720
 Set FontFamily "IosevkaTerm Nerd Font"
-Set FontSize 18
+Set FontSize 16
 Set Framerate 30
-Set TypingSpeed 55ms
+Set TypingSpeed 45ms
 Set Theme "Rose Pine"
 Set Padding 16
 
 Hide
-Type "nvim demo/example.lua"
+Type "tmux kill-session -t postil-vhs-preview 2>/dev/null || true"
+Enter
+Type "env -u TMUX -u TMUX_PANE tmux new-session -s postil-vhs-preview 'nvim demo/example.lua'"
 Enter
 Sleep 2s
 Type ":lua if Snacks and Snacks.notifier then Snacks.notifier.hide() end"
@@ -38,3 +40,10 @@ Escape
 Type ":w"
 Enter
 Sleep 4s
+
+Hide
+Ctrl+B
+Type "d"
+Sleep 500ms
+Type "tmux kill-session -t postil-vhs-preview"
+Enter
